@@ -13,6 +13,31 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
+st.markdown("""
+    <style>
+    /* Ukrycie niepotrzebnych elementów Streamlit */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    .stAppDeployButton {display: none !important;}
+    .stAppHeader {background: transparent !important;}
+    
+    /* Centrowanie i czyszczenie kontenera */
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 5rem;
+        max-width: 550px;
+    }
+    
+    /* Stylizacja expandera (Panelu) */
+    .stExpander {
+        border: 1px solid #2e3440 !important;
+        border-radius: 12px !important;
+        background-color: #1e222b !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 MODEL_NAME = "gemini-2.5-flash"
 
 # Prompt systemowy (skrócony dla przejrzystości)

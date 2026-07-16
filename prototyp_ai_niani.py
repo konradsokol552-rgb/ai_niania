@@ -94,9 +94,19 @@ def call_gemini_api(prompt, system_instruction, history, api_key):
 st.title("🤖 AI Niania — Iskra")
 
 # Ustawienia w expanderze
-with st.expander("⚙️ Konfiguracja"):
+with st.expander("⚙️ Konfiguracja i Panel Rodzica"):
     api_key = st.text_input("Klucz API", type="password")
-    user_id = st.text_input("ID Dziecka (dla bazy danych)", value="konrad_demo")
+    user_id = st.text_input("ID Dziecka", value="konrad_demo")
+    
+    st.divider()
+    st.subheader("📊 Ostatnie dane z rozmowy")
+    if "last_metadata" in st.session_state:
+        m = st.session_state.last_metadata
+        st.info(f"Emocja: {m.get('EMOTION', 'brak')}")
+        st.info(f"Zainteresowanie: {m.get('INTEREST', 'brak')}")
+        if m.get('ALERT'): st.error(f"ALERT: {m['ALERT']}")
+    else:
+        st.write("Czekam na dane z rozmowy...")
 
 # Historia czatu
 if "messages" not in st.session_state:

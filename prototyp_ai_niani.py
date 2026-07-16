@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-MODEL_NAME = "gemini-2.5-flash-preview-09-2025"
+MODEL_NAME = "gemini-2.5-flash"
 
 # Prompt systemowy (skrócony dla przejrzystości)
 DEFAULT_SYSTEM_PROMPT = (

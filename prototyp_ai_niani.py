@@ -81,19 +81,23 @@ def call_gemini_api(prompt, system_instruction, history, api_key):
 # --- STYLIZACJA CSS DLA LEPSZEGO EFEKTU MOBILNEGO ---
 st.markdown("""
     <style>
-    /* Usunięcie nadmiarowych marginesów, by aplikacja wyglądała jak mobilna */
-    .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 6rem;
-        max-width: 550px;
-    }
-    
-    /* Ukrycie domyślnego menu Streamlit dla czystego wyglądu */
+    /* Ukrycie paska bocznego, stopki i menu Streamlita */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* Stylizacja expandera ustawień */
+    /* Ukrycie przycisku "Deploy" i paska dekoracyjnego na górze */
+    .stAppDeployButton {display: none !important;}
+    .stAppHeader {background: transparent !important;}
+    
+    /* Zoptymalizowanie marginesów pod ekrany telefonów */
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 5rem;
+        max-width: 550px;
+    }
+    
+    /* Stylizacja panelu ustawień */
     .stExpander {
         border: 1px solid #2e3440 !important;
         border-radius: 12px !important;

@@ -94,19 +94,24 @@ def call_gemini_api(prompt, system_instruction, history, api_key):
 st.title("🤖 AI Niania — Iskra")
 
 # Ustawienia w expanderze
-with st.expander("⚙️ Konfiguracja i Panel Rodzica"):
-    api_key = st.text_input("Klucz API", type="password")
-    user_id = st.text_input("ID Dziecka", value="konrad_demo")
+# W expanderze w app.py
+st.subheader("📊 Ostatnie dane z bazy")
+
+if st.button("Odśwież dane z bazy"):
+    db = db_ops.get_db()
+    # Pobieramy ostatni rekord dla tego konkretnego dziecka
+    docs = db.collection("users").document(user_id).collection("conversations")\
+             .order_by("timestamp", direction=firestore.Query.DESCENDING)\
+             .limit(1).get()
     
-    st.divider()
-    st.subheader("📊 Ostatnie dane z rozmowy")
-    if "last_metadata" in st.session_state:
-        m = st.session_state.last_metadata
-        st.info(f"Emocja: {m.get('EMOTION', 'brak')}")
-        st.info(f"Zainteresowanie: {m.get('INTEREST', 'brak')}")
-        if m.get('ALERT'): st.error(f"ALERT: {m['ALERT']}")
+    if docs:
+        last_data = docs[0].to_dict()
+        st.success(f"Emocja: {last_data.get('emotion')}")
+        st.info(f"Zainteresowanie: {last_data.get('interest')}")
+        if last_data.get('alert'): 
+            st.error(f"ALERT: {last_data['alert']}")
     else:
-        st.write("Czekam na dane z rozmowy...")
+        st.warning("Brak danych dla tego użytkownika.")
 
 # Historia czatu
 if "messages" not in st.session_state:

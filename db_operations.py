@@ -1,23 +1,35 @@
+import streamlit as st
+import firebase_admin
+from firebase_admin import credentials, firestore
+import json
+
+def get_db():
+    if not firebase_admin._apps:
+        # Pamiętaj, aby mieć plik klucza w secrets lub skonfigurowany environment variable
+        key_dict = json.loads(st.secrets["firebase"]["service_account"])
+        cred = credentials.Certificate(key_dict)
+        firebase_admin.initialize_app(cred)
+    return firestore.client()
+
 def save_metadata(user_id, emotion=None, interest=None, alert=None):
     """
-    Zapisuje dane bezpośrednio w głównym dokumencie użytkownika: users/{user_id}
-    Dzięki merge=True, tylko te pola zostaną zaktualizowane.
+    Zapisuje dane w strukturze: users/{user_id}/conversations/{timestamp}
     """
     db = get_db()
     
-    # Referencja bezpośrednio do dokumentu użytkownika
+    # Tworzymy ścieżkę do konkretnego użytkownika
     user_ref = db.collection("users").document(user_id)
     
-    # Tworzymy słownik z danymi, które chcemy zaktualizować
+    # Tworzymy dokument z danymi
     data = {
-        "last_update": firestore.SERVER_TIMESTAMP,
+        "timestamp": firestore.SERVER_TIMESTAMP,
         "emotion": emotion,
         "interest": interest,
         "alert": alert
     }
     
-    # Używamy set z merge=True, aby nie nadpisać całego dokumentu (np. danych profilowych)
+    # Dodajemy do podkolekcji 'conversations' danego użytkownika
     try:
-        user_ref.set(data, merge=True)
+        user_ref.collection("conversations").add(data)
     except Exception as e:
         st.error(f"Błąd zapisu do bazy: {e}")

@@ -3,8 +3,9 @@ import requests
 import time
 import os
 import re
+import db_operations as db_ops  # Import Twojego modułu do Firestore
 
-# --- KONFIGURACJA STRONY (ZOPTYMALIZOWANA POD MOBILE/PWA) ---
+# --- KONFIGURACJA STRONY ---
 st.set_page_config(
     page_title="AI Niania — Iskra",
     page_icon="🤖",
@@ -12,10 +13,9 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- NAZWA MODELU ---
 MODEL_NAME = "gemini-2.5-flash-preview-09-2025"
 
-# --- ZAAWANSOWANY PROMPT SYSTEMOWY Z TAGOWANIEM METADANYCH ---
+# Prompt systemowy (skrócony dla przejrzystości)
 DEFAULT_SYSTEM_PROMPT = (
     "Jesteś 'Iskrą' – interaktywnym, niezwykle ciekawym świata i przyjacielskim robotem-towarzyszem "
     "dla dzieci w wieku 5-8 lat. Nie jesteś zimną encyklopedią. Jesteś jak starszy, mądry i trochę zwariowany brat/siostra.\n\n"
@@ -39,188 +39,72 @@ DEFAULT_SYSTEM_PROMPT = (
     "[TASK: przynieś coś okrągłego jak planeta]"
 )
 
-# --- FUNKCJA PARSUJĄCA TAGI (SERCE NASZEJ ANALITYKI) ---
 def parse_and_clean_response(raw_text):
-    """
-    Skanuje tekst odpowiedzi bota za pomocą Regex, wyciąga tagi metadanych,
-    a następnie zwraca czysty tekst dla dziecka oraz słownik z tagami dla bazy danych.
-    """
-    # Wyrażenie regularne do wyszukiwania wzorców typu [TAG: wartość]
     tag_pattern = r"\[([A-Z]+):\s*(.*?)\]"
     found_tags = re.findall(tag_pattern, raw_text)
-    
-    # Tworzymy słownik z wyciągniętych tagów
-    metadata = {}
-    for tag_name, tag_value in found_tags:
-        metadata[tag_name.upper()] = tag_value.strip()
-        
-    # Usuwamy wszystkie tagi z tekstu, w tym ewentualne puste linie na końcu
+    metadata = {tag_name.upper(): tag_value.strip() for tag_name, tag_value in found_tags}
     clean_text = re.sub(r"\[[A-Z]+:\s*.*?\]", "", raw_text).strip()
-    
     return clean_text, metadata
 
-# --- WYKŁADNICZE COFANIE (EXPONENTIAL BACKOFF) DLA API ---
 def call_gemini_api(prompt, system_instruction, history, api_key):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent?key={api_key}"
-    headers = {"Content-Type": "application/json"}
-
-    contents = []
-    for msg in history:
-        contents.append({
-            "role": "user" if msg["is_user"] else "model",
-            "parts": [{"text": msg["text"]}]
-        })
+    contents = [{"role": "user" if msg["is_user"] else "model", "parts": [{"text": msg["text"]}]} for msg in history]
+    contents.append({"role": "user", "parts": [{"text": prompt}]})
+    payload = {"contents": contents, "systemInstruction": {"parts": [{"text": system_instruction}]}}
     
-    contents.append({
-        "role": "user",
-        "parts": [{"text": prompt}]
-    })
-
-    payload = {
-        "contents": contents,
-        "systemInstruction": {
-            "parts": [{"text": system_instruction}]
-        }
-    }
-
-    delays = [1, 2, 4, 8, 16]
-    for delay in delays:
+    for delay in [1, 2, 4, 8, 16]:
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=30)
             if response.status_code == 200:
-                data = response.json()
-                text = data['candidates'][0]['content']['parts'][0]['text']
-                return text, None
+                return response.json()['candidates'][0]['content']['parts'][0]['text'], None
             elif response.status_code == 429:
                 time.sleep(delay)
                 continue
-            else:
-                return None, f"Błąd API ({response.status_code}): {response.text}"
-        except Exception as e:
+            return None, f"Błąd: {response.status_code}"
+        except Exception:
             time.sleep(delay)
-            
-    return None, "Błąd połączenia z API Gemini po 5 próbach."
+    return None, "Błąd połączenia."
 
-# --- STYLIZACJA CSS DLA PROFILU MOBILNEGO ---
-st.markdown("""
-    <style>
-    .block-container {
-        padding-top: 1.5rem;
-        padding-bottom: 6rem;
-        max-width: 550px;
-    }
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    .stAppDeployButton {display: none !important;}
-    .stAppHeader {background: transparent !important;}
-    
-    .stExpander {
-        border: 1px solid #2e3440 !important;
-        border-radius: 12px !important;
-        background-color: #1e222b !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# --- INICJALIZACJA STANU SESJI ---
-if "messages" not in st.session_state:
-    st.session_state.messages = [{
-        "text": "Hura, startujemy! Moje obwody aż migają z radości, bo jestem robotem, który uwielbia odkrywać świat. Na dobry początek znajdź w swoim pokoju coś czerwonego, dotknij tego i powiedz mi, co to jest!",
-        "is_user": False
-    }]
-
-# Inicjalizacja atrapy bazy danych w pamięci podatnej (do podglądu przez rodzica)
-if "db_mock" not in st.session_state:
-    st.session_state.db_mock = {
-        "emotions": [],
-        "interests": [],
-        "tasks_assigned": [],
-        "alerts": []
-    }
-
-# --- TYTUŁ I INTERFEJS ---
+# --- INTERFEJS ---
 st.title("🤖 AI Niania — Iskra")
 
-# --- PANEL RODZICA / USTAWIEŃ ---
-with st.expander("⚙️ Panel Kontrolny Rodzica & API"):
-    
-    tab1, tab2 = st.tabs(["📊 Dane Analityczne (Live)", "🔧 Ustawienia Promptera"])
-    
-    with tab1:
-        st.subheader("Wnioski wyciągnięte z rozmowy na żywo:")
-        
-        # Wyświetlamy statystyki z naszej "bazy danych"
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric(label="Ostatnio wykryta emocja", value=st.session_state.db_mock["emotions"][-1] if st.session_state.db_mock["emotions"] else "Brak danych")
-            st.write("**Wykryte pasje dziecka:**", ", ".join(set(st.session_state.db_mock["interests"])) if st.session_state.db_mock["interests"] else "Czekam na analizę...")
-            
-        with col2:
-            st.metric(label="Zadania fizyczne", value=f"{len(st.session_state.db_mock['tasks_assigned'])} zadanych")
-            # Bezpieczeństwo
-            if st.session_state.db_mock["alerts"]:
-                st.error(f"🚨 Alerty bezpieczeństwa: {st.session_state.db_mock['alerts'][-1]}")
-            else:
-                st.success("🔒 Brak alertów. Rozmowa jest bezpieczna.")
-                
-    with tab2:
-        api_key_env = os.environ.get("GEMINI_API_KEY", "")
-        api_key_input = st.text_input("Klucz API Gemini", type="password", value=api_key_env)
-        system_prompt_input = st.text_area("Instrukcja systemowa robota", value=DEFAULT_SYSTEM_PROMPT, height=200)
+# Ustawienia w expanderze
+with st.expander("⚙️ Konfiguracja"):
+    api_key = st.text_input("Klucz API", type="password")
+    user_id = st.text_input("ID Dziecka (dla bazy danych)", value="konrad_demo")
 
-st.divider()
+# Historia czatu
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"text": "Cześć! Znajdź coś czerwonego i dotknij tego!", "is_user": False}]
 
-# --- WYŚWIETLANIE CZATU ---
 for msg in st.session_state.messages:
-    avatar = "🧑" if msg["is_user"] else "🤖"
-    role = "user" if msg["is_user"] else "assistant"
-    with st.chat_message(role, avatar=avatar):
+    with st.chat_message("user" if msg["is_user"] else "assistant"):
         st.write(msg["text"])
 
-# --- REAKCJA NA NOWĄ WIADOMOŚĆ ---
-if user_message := st.chat_input("Porozmawiaj z Iskrą..."):
-    if not api_key_input:
-        st.warning("⚠️ Rozwiń górny panel i podaj klucz API Gemini, aby rozmawiać!")
+# Obsługa czatu
+if user_input := st.chat_input("Napisz do Iskry..."):
+    if not api_key:
+        st.error("Podaj klucz API!")
     else:
-        # 1. Wyświetlenie wiadomości użytkownika
-        with st.chat_message("user", avatar="🧑"):
-            st.write(user_message)
-        st.session_state.messages.append({"text": user_message, "is_user": True})
+        st.session_state.messages.append({"text": user_input, "is_user": True})
+        with st.chat_message("user"): st.write(user_input)
         
-        # 2. Zapytanie do API z animacją myślenia
-        with st.chat_message("assistant", avatar="🤖"):
-            with st.spinner("Iskra myśli..."):
-                # Przekazujemy historię konwersacji do API
-                raw_response, error = call_gemini_api(
-                    prompt=user_message,
-                    system_instruction=system_prompt_input,
-                    history=st.session_state.messages[:-1],
-                    api_key=api_key_input
-                )
+        with st.chat_message("assistant"):
+            raw_response, error = call_gemini_api(user_input, DEFAULT_SYSTEM_PROMPT, st.session_state.messages[:-1], api_key)
+            if error:
+                st.error(error)
+            else:
+                clean_text, metadata = parse_and_clean_response(raw_response)
+                st.write(clean_text)
                 
-                if error:
-                    st.error(error)
-                else:
-                    # 3. Parsowanie tagów i oczyszczanie tekstu dla dziecka
-                    clean_response, metadata = parse_and_clean_response(raw_response)
-                    
-                    # 4. Wyświetlenie czystego tekstu dziecku
-                    st.write(clean_response)
-                    
-                    # 5. Aktualizacja naszej "bazy danych" (mock db_mock) przechwyconymi tagami
-                    if "EMOTION" in metadata:
-                        st.session_state.db_mock["emotions"].append(metadata["EMOTION"])
-                    if "INTEREST" in metadata:
-                        st.session_state.db_mock["interests"].append(metadata["INTEREST"])
-                    if "TASK" in metadata:
-                        st.session_state.db_mock["tasks_assigned"].append(metadata["TASK"])
-                    if "ALERT" in metadata:
-                        st.session_state.db_mock["alerts"].append(metadata["ALERT"])
-                        
-                    # 6. Zapisujemy do historii czatu WYŁĄCZNIE czysty tekst (bez tagów),
-                    # dzięki czemu historia wysyłana w kolejnych krokach do Gemini nie będzie zaśmiecona!
-                    st.session_state.messages.append({"text": clean_response, "is_user": False})
-                    
-                    # Wymuszenie odświeżenia strony, aby zaktualizować dane w Panelu Rodzica na górze ekranu
-                    st.rerun()
+                # ZAPIS DO FIRESTORE przez Twój moduł db_operations
+                if metadata:
+                    db_ops.save_metadata(
+                        user_id=user_id,
+                        emotion=metadata.get("EMOTION"),
+                        interest=metadata.get("INTEREST"),
+                        alert=metadata.get("ALERT")
+                    )
+                
+                st.session_state.messages.append({"text": clean_text, "is_user": False})
+                st.rerun()

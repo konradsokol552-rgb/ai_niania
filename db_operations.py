@@ -15,22 +15,22 @@ def save_metadata(user_id, emotion=None, interest=None, alert=None):
     db = get_db()
     user_ref = db.collection("users").document(user_id)
     
-    # 2. Używamy aktualnego czasu w formacie UTC
+    # Używamy czasu UTC
     current_time = datetime.datetime.now(datetime.timezone.utc)
     
     new_message_map = {
-        "timestamp": current_time, # Używamy wygenerowanego czasu
+        "timestamp": current_time,
         "emotion": emotion,
         "interest": interest,
         "alert": alert
     }
     
+    # Ta jedna linijka załatwia cały problem:
+    # merge=True sprawia, że jeśli dokument nie istnieje, to zostanie stworzony.
+    # Jeśli istnieje, to tylko pole 'history' zostanie zaktualizowane o nowy element.
     try:
-        user_ref.update({
-            "history": firestore.ArrayUnion([new_message_map])
-        })
-    except Exception:
-        # Jeśli dokument nie istnieje, set stworzy go z pierwszym elementem w tablicy
         user_ref.set({
-            "history": [new_message_map]
+            "history": firestore.ArrayUnion([new_message_map])
         }, merge=True)
+    except Exception as e:
+        st.error(f"Błąd krytyczny bazy danych: {e}")

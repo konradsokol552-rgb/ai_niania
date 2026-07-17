@@ -2,6 +2,7 @@ import streamlit as st
 import firebase_admin
 from firebase_admin import credentials, firestore
 import json
+import datetime  # 1. Dodaj ten import
 
 def get_db():
     if not firebase_admin._apps:
@@ -11,25 +12,20 @@ def get_db():
     return firestore.client()
 
 def save_metadata(user_id, emotion=None, interest=None, alert=None):
-    """
-    Zapisuje wiadomość jako mapę w tablicy 'history' w dokumencie użytkownika.
-    """
     db = get_db()
-    
-    # Referencja do dokumentu użytkownika
     user_ref = db.collection("users").document(user_id)
     
-    # Tworzymy mapę (obiekt) z danymi tej jednej wiadomości
+    # 2. Używamy aktualnego czasu w formacie UTC
+    current_time = datetime.datetime.now(datetime.timezone.utc)
+    
     new_message_map = {
-        "timestamp": firestore.SERVER_TIMESTAMP,
+        "timestamp": current_time, # Używamy wygenerowanego czasu
         "emotion": emotion,
         "interest": interest,
         "alert": alert
     }
     
-    # Używamy array_union, aby dopisać tę mapę do pola 'history'
     try:
-        # Próba dodania do istniejącej tablicy
         user_ref.update({
             "history": firestore.ArrayUnion([new_message_map])
         })

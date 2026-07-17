@@ -4,12 +4,7 @@ from firebase_admin import credentials, firestore
 import json
 
 def get_db():
-    """
-    Inicjalizuje połączenie z Firestore.
-    Musi być w tym samym pliku, co funkcje, które z niej korzystają.
-    """
     if not firebase_admin._apps:
-        # Pobieramy JSON z sekretów Streamlit
         key_dict = json.loads(st.secrets["firebase"]["service_account"])
         cred = credentials.Certificate(key_dict)
         firebase_admin.initialize_app(cred)
@@ -17,23 +12,29 @@ def get_db():
 
 def save_metadata(user_id, emotion=None, interest=None, alert=None):
     """
-    Zapisuje dane bezpośrednio w dokumencie użytkownika: users/{user_id}
+    Zapisuje wiadomość jako mapę w tablicy 'history' w dokumencie użytkownika.
     """
-    db = get_db()  # Teraz ta funkcja jest widoczna!
+    db = get_db()
     
-    # Referencja bezpośrednio do dokumentu użytkownika
+    # Referencja do dokumentu użytkownika
     user_ref = db.collection("users").document(user_id)
     
-    # Tworzymy słownik z danymi
-    data = {
+    # Tworzymy mapę (obiekt) z danymi tej jednej wiadomości
+    new_message_map = {
         "timestamp": firestore.SERVER_TIMESTAMP,
         "emotion": emotion,
         "interest": interest,
         "alert": alert
     }
     
-    # Używamy set z merge=True, aby nadpisać pola w dokumencie bez tworzenia podkolekcji
+    # Używamy array_union, aby dopisać tę mapę do pola 'history'
     try:
-        user_ref.set(data, merge=True)
-    except Exception as e:
-        st.error(f"Błąd zapisu do bazy: {e}")
+        # Próba dodania do istniejącej tablicy
+        user_ref.update({
+            "history": firestore.ArrayUnion([new_message_map])
+        })
+    except Exception:
+        # Jeśli dokument nie istnieje, set stworzy go z pierwszym elementem w tablicy
+        user_ref.set({
+            "history": [new_message_map]
+        }, merge=True)

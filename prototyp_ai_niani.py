@@ -208,7 +208,8 @@ def screen_parent():
     st.divider()
     
     # ZMIANA: Powrót do menu zamiast resetu sesji
-    if st.button("wyjdź", type="primary", use_container_width=True):
+    if st.button("wyjdź", #type="primary", use_container_width=True ):
+    ):
         st.session_state.role = "login"
         st.rerun()
         

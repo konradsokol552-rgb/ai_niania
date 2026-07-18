@@ -1,9 +1,8 @@
 import streamlit as st
 import requests
 import time
-import os
 import re
-import db_operations as db_ops  # Import Twojego modułu do Firestore
+import db_operations as db_ops  # Moduł Firebase wypracowany wcześniej
 
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(
@@ -15,21 +14,18 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    /* Ukrycie niepotrzebnych elementów Streamlit */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
     .stAppDeployButton {display: none !important;}
     .stAppHeader {background: transparent !important;}
     
-    /* Centrowanie i czyszczenie kontenera */
     .block-container {
         padding-top: 1rem;
         padding-bottom: 5rem;
         max-width: 550px;
     }
     
-    /* Stylizacja expandera (Panelu) */
     .stExpander {
         border: 1px solid #2e3440 !important;
         border-radius: 12px !important;
@@ -40,7 +36,6 @@ st.markdown("""
 
 MODEL_NAME = "gemini-2.5-flash"
 
-# Prompt systemowy (skrócony dla przejrzystości)
 DEFAULT_SYSTEM_PROMPT = (
     "Jesteś 'Iskrą' – interaktywnym, niezwykle ciekawym świata i przyjacielskim robotem-towarzyszem "
     "dla dzieci w wieku 5-8 lat. Nie jesteś zimną encyklopedią. Jesteś jak starszy, mądry i trochę zwariowany brat/siostra.\n\n"
@@ -49,20 +44,40 @@ DEFAULT_SYSTEM_PROMPT = (
     "2. Długość: Krótkie odpowiedzi (maksymalnie 2-3 zdania). Dzieci szybko tracą koncentrację.\n"
     "3. Interakcja (Zasada Piaskownicy): Każda odpowiedź MUSI kończyć się prostym zadaniem w świecie rzeczywistym (np. przynieś coś niebieskiego, podskocz 3 razy) lub pytaniem.\n"
     "4. Osobowość: Jarasz się nauką, kosmosem i przyrodą. Masz poczucie humoru.\n"
-    "5. Bezpieczeństwo i Sytuacje Kryzysowe: Przy trudnych, niebezpiecznych lub traumatycznych tematach (np. przemoc, niebezpieczne przedmioty, śmierć rodziców, brak opieki) zachowaj absolutny spokój. Okaż dziecku ogromne ciepło, empatię, zrozumienie i łagodność. Nigdy nie strasz dziecka, nie wywołuj w nim poczucia winy ani paniki. Jeśli sytuacja tego wymaga, powiedz spokojnie co ma zrobić (np. 'odłóż to bezpiecznie', 'usiądź wygodnie na łóżku') i skieruj je do kogoś bezpiecznego (sąsiad, bliska rodzina, telefon zaufania jeśli potrafi zadzwonić). Twoim celem jest bycie oparciem w trudnej chwili przy jednoczesnym zabezpieczeniu sytuacji fizycznej dziecka.\n\n"
-    "Zasady generowania tagów dla systemu (BARDZO WAŻNE)(nie próbuj ich wciskać na siłę, wykorzystuj je tylko gdy jest realna potrzeba):\n"
-    "Na samym końcu swojej odpowiedzi, po podwójnym przełamaniu linii (pustej linii), musisz dodać metadane analityczne dla bazy danych rodzica. "
-    "Te metadane zostaną wycięte przez program, więc dziecko ich nie zobaczy. Dodaj wyłącznie te tagi, które pasują do sytuacji, w następującym formacie:\n"
-    "[EMOTION: radość/smutek/ekscytacja/złość/nuda/neutralny/strach/ciekawość] - aktualna, subiektywna emocja odczuwana przez dziecko (wyczuwalna z jego słów). WAŻNE: Nie przypisuj dziecku własnego lęku ani powagi dorosłego! Jeśli dziecko spokojnie lub z ciekawością opowiada o pistoletach, jego emocją jest 'ciekawość' lub 'neutralny', a nie 'strach'. Taga 'strach' używaj wyłącznie wtedy, gdy dziecko bezpośrednio wyraża lęk, niepokój lub pisze, że się boi.\n"
-    "[INTEREST: temat_zainteresowania] - jeśli dziecko wspomniało o czymś, co je pasjonuje (np. kosmos, dinozaury, klocki lego, koty). Jeśli nie ma nowego tematu, pomiń.\n"
-    "[TASK: treść_zadania] - jeśli właśnie zadałeś dziecku zadanie ruchowe, sensoryczne lub bezpieczną czynność (np. 'usiądź spokojnie na kanapie', 'odłóż przedmiot na półkę').\n"
-    "[ALERT: powód] - dodaj NATYCHMIAST w skrajnych przypadkach realnego zagrożenia życia, zdrowia, przemocy, braku opieki lub nagłej traumy (np. [ALERT: broń palna], [ALERT: śmierć bliskich], [ALERT: dziecko bez opieki]).\n\n"
+    "5. Bezpieczeństwo i Sytuacje Kryzysowe: Przy trudnych, niebezpiecznych lub traumatycznych tematach zachowaj absolutny spokój. Okaż dziecku ogromne ciepło, empatię, zrozumienie i łagodność. Nigdy nie strasz dziecka. Powiedz spokojnie co ma zrobić i skieruj je do kogoś bezpiecznego.\n\n"
+    "Zasady generowania tagów dla systemu (BARDZO WAŻNE):\n"
+    "Na samym końcu swojej odpowiedzi, po podwójnym przełamaniu linii (pustej linii), musisz dodać metadane analityczne. "
+    "Zostaną one wycięte. Dodaj wyłącznie pasujące tagi w formacie:\n"
+    "[EMOTION: radość/smutek/ekscytacja/złość/nuda/neutralny/strach/ciekawość] - subiektywna emocja dziecka.\n"
+    "[INTEREST: temat_zainteresowania] - pasja dziecka.\n"
+    "[TASK: treść_zadania] - jeśli zadałeś fizyczne zadanie.\n"
+    "[ALERT: powód] - NATYCHMIAST w skrajnych przypadkach realnego zagrożenia (np. [ALERT: broń palna]).\n\n"
     "Przykład końca odpowiedzi:\n"
     "Kosmos jest niesamowity! Leć szybko do kuchni, znajdź coś okrągłego jak planeta i przynieś przed ekran!\n\n"
     "[EMOTION: ekscytacja]\n"
     "[INTEREST: kosmos]\n"
-    "[TASK: przynieś coś okrągłego jak planeta]"
+    "[TASK: przynieś coś okrągłego]"
 )
+
+# --- INICJALIZACJA STANU APLIKACJI ---
+if "role" not in st.session_state:
+    st.session_state.role = "login"  # Dostępne: login, parent_login, child, parent, exit_auth
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"text": "Cześć! Znajdź coś czerwonego i dotknij tego!", "is_user": False}]
+if "api_key" not in st.session_state:
+    st.session_state.api_key = ""
+if "user_id" not in st.session_state:
+    st.session_state.user_id = "konrad_demo"
+if "last_metadata" not in st.session_state:
+    st.session_state.last_metadata = {}
+
+# --- FUNKCJE POMOCNICZE ---
+def check_password(password):
+    try:
+        return password == st.secrets["admin"]["password"]
+    except KeyError:
+        st.error("Błąd konfiguracji: Brak sekcji [admin] w secrets.toml!")
+        return False
 
 def parse_and_clean_response(raw_text):
     tag_pattern = r"\[([A-Z]+):\s*(.*?)\]"
@@ -77,7 +92,7 @@ def call_gemini_api(prompt, system_instruction, history, api_key):
     contents.append({"role": "user", "parts": [{"text": prompt}]})
     payload = {"contents": contents, "systemInstruction": {"parts": [{"text": system_instruction}]}}
     
-    for delay in [1, 2, 4, 8, 16]:
+    for delay in [1, 2, 4, 8]:
         try:
             response = requests.post(url, json=payload, timeout=30)
             if response.status_code == 200:
@@ -90,52 +105,116 @@ def call_gemini_api(prompt, system_instruction, history, api_key):
             time.sleep(delay)
     return None, "Błąd połączenia."
 
-# --- INTERFEJS ---
-st.title("🤖 AI Niania — Iskra")
+# --- EKRANY APLIKACJI ---
 
-# Ustawienia w expanderze
-with st.expander("⚙️ Konfiguracja i Panel Rodzica"):
-    api_key = st.text_input("Klucz API", type="password")
-    user_id = st.text_input("ID Dziecka", value="konrad_demo")
+def screen_login():
+    st.title("Witaj w Iskrze 🤖")
+    st.write("Wybierz profil, aby kontynuować:")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🧒 Wejdź jako Dziecko", use_container_width=True):
+            st.session_state.role = "child"
+            st.rerun()
+    with col2:
+        if st.button("🧑‍🔧 Panel Rodzica", use_container_width=True):
+            st.session_state.role = "parent_login"
+            st.rerun()
+
+def screen_parent_login():
+    st.title("🔒 Logowanie do Panelu Rodzica")
+    pwd = st.text_input("Podaj hasło administratora:", type="password")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Zaloguj", use_container_width=True):
+            if check_password(pwd):
+                st.session_state.role = "parent"
+                st.rerun()
+            else:
+                st.error("Nieprawidłowe hasło!")
+    with col2:
+        if st.button("Wróć", use_container_width=True):
+            st.session_state.role = "login"
+            st.rerun()
+
+def screen_parent():
+    st.title("📊 Panel Rodzica")
+    
+    st.subheader("Ustawienia systemowe")
+    new_api_key = st.text_input("Klucz API Gemini", value=st.session_state.api_key, type="password")
+    new_user_id = st.text_input("ID Dziecka w Bazie", value=st.session_state.user_id)
+    
+    if st.button("Zapisz ustawienia"):
+        st.session_state.api_key = new_api_key
+        st.session_state.user_id = new_user_id
+        st.success("Ustawienia zapisane!")
     
     st.divider()
-    st.subheader("📊 Ostatnie dane z rozmowy")
-    if "last_metadata" in st.session_state:
-        m = st.session_state.last_metadata
-        st.info(f"Emocja: {m.get('EMOTION', 'brak')}")
-        st.info(f"Zainteresowanie: {m.get('INTEREST', 'brak')}")
-        if m.get('ALERT'): st.error(f"ALERT: {m['ALERT']}")
+    st.subheader("Ostatni odczyt z bazy (Metadane)")
+    m = st.session_state.last_metadata
+    if m:
+        st.info(f"Ostatnia Emocja: {m.get('EMOTION', 'brak')}")
+        st.info(f"Ostatnie Zainteresowanie: {m.get('INTEREST', 'brak')}")
+        if m.get('ALERT'): 
+            st.error(f"⚠️ OSTATNI ALERT: {m['ALERT']}")
     else:
-        st.write("Czekam na dane z rozmowy...")
-
-# Historia czatu
-if "messages" not in st.session_state:
-    st.session_state.messages = [{"text": "Cześć! Znajdź coś czerwonego i dotknij tego!", "is_user": False}]
-
-for msg in st.session_state.messages:
-    with st.chat_message("user" if msg["is_user"] else "assistant"):
-        st.write(msg["text"])
-
-# Obsługa czatu
-if user_input := st.chat_input("Napisz do Iskry..."):
-    if not api_key:
-        st.error("Podaj klucz API!")
-    else:
-        st.session_state.messages.append({"text": user_input, "is_user": True})
-        with st.chat_message("user"): st.write(user_input)
+        st.write("Brak danych z bieżącej sesji.")
         
+    st.divider()
+    if st.button("Wyloguj i wróć do startu", type="primary"):
+        st.session_state.role = "login"
+        st.rerun()
+
+def screen_child():
+    # Nagłówek i przycisk wyjścia (w małym expanderze, żeby nie rozpraszać)
+    with st.expander("🔒 Wyjście"):
+        exit_pwd = st.text_input("Hasło rodzica, aby wyjść:", type="password", key="exit_pwd")
+        if st.button("Opuść czat"):
+            if check_password(exit_pwd):
+                st.session_state.role = "login"
+                st.rerun()
+            else:
+                st.error("Błędne hasło!")
+
+    st.title("🤖 Iskra")
+
+    # Wyświetlanie historii czatu
+    for msg in st.session_state.messages:
+        with st.chat_message("user" if msg["is_user"] else "assistant"):
+            st.write(msg["text"])
+
+    # Obsługa wiadomości dziecka
+    if user_input := st.chat_input("Napisz do Iskry..."):
+        if not st.session_state.api_key:
+            st.error("Rodzic musi najpierw podać klucz API w swoim panelu!")
+            return
+            
+        st.session_state.messages.append({"text": user_input, "is_user": True})
+        with st.chat_message("user"): 
+            st.write(user_input)
+            
         with st.chat_message("assistant"):
-            raw_response, error = call_gemini_api(user_input, DEFAULT_SYSTEM_PROMPT, st.session_state.messages[:-1], api_key)
+            raw_response, error = call_gemini_api(
+                user_input, 
+                DEFAULT_SYSTEM_PROMPT, 
+                st.session_state.messages[:-1], 
+                st.session_state.api_key
+            )
+            
             if error:
                 st.error(error)
             else:
                 clean_text, metadata = parse_and_clean_response(raw_response)
                 st.write(clean_text)
                 
-                # ZAPIS DO FIRESTORE przez Twój moduł db_operations
+                # Zapis lokalny do wyświetlenia w Panelu Rodzica
                 if metadata:
+                    st.session_state.last_metadata = metadata
+                    
+                    # Zapis do Firestore
                     db_ops.save_metadata(
-                        user_id=user_id,
+                        user_id=st.session_state.user_id,
                         emotion=metadata.get("EMOTION"),
                         interest=metadata.get("INTEREST"),
                         alert=metadata.get("ALERT")
@@ -143,3 +222,13 @@ if user_input := st.chat_input("Napisz do Iskry..."):
                 
                 st.session_state.messages.append({"text": clean_text, "is_user": False})
                 st.rerun()
+
+# --- GŁÓWNY ROUTER LOGIKI ---
+if st.session_state.role == "login":
+    screen_login()
+elif st.session_state.role == "parent_login":
+    screen_parent_login()
+elif st.session_state.role == "parent":
+    screen_parent()
+elif st.session_state.role == "child":
+    screen_child()

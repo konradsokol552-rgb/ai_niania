@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import time
 import re
+import datetime
 import db_operations as db_ops
 
 # --- KONFIGURACJA STRONY ---
@@ -63,8 +64,6 @@ if "user_id" not in st.session_state:
     st.session_state.user_id = ""
 if "parent_password" not in st.session_state:
     st.session_state.parent_password = "1234"
-if "last_metadata" not in st.session_state:
-    st.session_state.last_metadata = {}
 
 # --- FUNKCJE POMOCNICZE ---
 def parse_and_clean_response(raw_text):
@@ -94,42 +93,42 @@ def call_gemini_api(prompt, system_instruction, history, api_key):
     return None, "Błąd połączenia."
 
 def load_user_data(account_id):
-    """Pobiera dane profilu z bazy i ładuje je do pamięci podręcznej Streamlita"""
     profile = db_ops.get_user_profile(account_id)
-    
     st.session_state.user_id = account_id
     st.session_state.api_key = profile.get("api_key", "")
     st.session_state.parent_password = profile.get("parent_password", "1234")
     
-    # Ładowanie historii czatu
     chat_history = profile.get("chat_history", [])
     if not chat_history:
         st.session_state.messages = [{"text": "Cześć! Znajdź coś czerwonego i dotknij tego!", "is_user": False}]
     else:
         st.session_state.messages = chat_history
 
-    # --- NOWE: Ładowanie ostatnich metadanych z bazy ---
-    metadata_history = profile.get("history", [])
-    if metadata_history:
-        # Pobieramy ostatni element z tablicy (najnowsze metadane)
-        last_db_meta = metadata_history[-1] 
-        # Mapujemy klucze z bazy (małe litery) na to, czego oczekuje interfejs (wielkie litery)
-        st.session_state.last_metadata = {
-            "EMOTION": last_db_meta.get("emotion"),
-            "INTEREST": last_db_meta.get("interest"),
-            "ALERT": last_db_meta.get("alert")
-        }
-    else:
-        st.session_state.last_metadata = {}
-
 # --- EKRANY APLIKACJI ---
 
 def screen_login():
     st.title("Witaj w Iskrze 🤖")
     
-    # ID konta jest kluczem do wczytania wszystkiego
-    account_id = st.text_input("Wpisz ID Konta (nazwę użytkownika):", value=st.session_state.user_id)
-    
+    # Automatyczne logowanie: jeśli rola zmieniła się po powrocie, ale użytkownik jest już w bazie
+    if st.session_state.user_id:
+        load_user_data(st.session_state.user_id)
+        st.info(f"Wykryto aktywną sesję dla: **{st.session_state.user_id}**")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🧒 Wejdź jako Dziecko", use_container_width=True):
+                st.session_state.role = "child"
+                st.rerun()
+        with col2:
+            if st.button("🧑‍🔧 Panel Rodzica", use_container_width=True):
+                st.session_state.role = "parent_login"
+                st.rerun()
+        
+        if st.button("Zmień konto / Zaloguj na inne ID", type="secondary"):
+            st.session_state.user_id = ""
+            st.rerun()
+        return
+
+    account_id = st.text_input("Wpisz ID Konta (nazwę użytkownika):")
     if account_id:
         st.write("Wybierz profil, aby kontynuować:")
         col1, col2 = st.columns(2)
@@ -143,13 +142,10 @@ def screen_login():
                 load_user_data(account_id)
                 st.session_state.role = "parent_login"
                 st.rerun()
-    else:
-        st.info("👆 Podaj identyfikator, aby uzyskać dostęp do konta.")
 
 def screen_parent_login():
     st.title("🔒 Logowanie do Panelu Rodzica")
     st.write(f"Konto: **{st.session_state.user_id}**")
-    
     pwd = st.text_input("Podaj hasło rodzica:", type="password")
     
     col1, col2 = st.columns(2)
@@ -159,7 +155,7 @@ def screen_parent_login():
                 st.session_state.role = "parent"
                 st.rerun()
             else:
-                st.error("Nieprawidłowe hasło! (Domyślne to 1234)")
+                st.error("Nieprawidłowe hasło!")
     with col2:
         if st.button("Wróć", use_container_width=True):
             st.session_state.role = "login"
@@ -176,30 +172,51 @@ def screen_parent():
         if new_password.strip() == "":
             st.error("Hasło nie może być puste!")
         else:
-            success = db_ops.update_account_settings(st.session_state.user_id, new_password, new_api_key)
-            if success:
+            if db_ops.update_account_settings(st.session_state.user_id, new_password, new_api_key):
                 st.session_state.api_key = new_api_key
                 st.session_state.parent_password = new_password
                 st.success("Ustawienia zostały pomyślnie zapisane w bazie danych!")
     
     st.divider()
-    st.subheader("📊 Ostatni odczyt z bazy (Metadane)")
-    m = st.session_state.last_metadata
-    if m:
-        st.info(f"Ostatnia Emocja: {m.get('EMOTION', 'brak')}")
-        st.info(f"Ostatnie Zainteresowanie: {m.get('INTEREST', 'brak')}")
-        if m.get('ALERT'): 
-            st.error(f"⚠️ OSTATNI ALERT: {m['ALERT']}")
-    else:
-        st.write("Brak nowych metadanych z bieżącej sesji.")
+    st.subheader("📊 Analiza zachowań z ostatnich 30 dni")
+    
+    # Pobieramy świeże dane profilu z bazy danych
+    profile = db_ops.get_user_profile(st.session_state.user_id)
+    metadata_history = profile.get("history", [])
+    
+    now = datetime.datetime.now(datetime.timezone.utc)
+    thirty_days_ago = now - datetime.timedelta(days=30)
+    
+    valid_records = 0
+    
+    # Przechodzimy od najnowszych wpisów do najstarszych
+    for m in reversed(metadata_history):
+        ts = m.get("timestamp")
+        # Konwersja timestampu z Firebase na obiekt datetime, jeśli jest taka potrzeba
+        if ts:
+            # Filtrujemy dane z ostatnich 30 dni
+            if ts >= thirty_days_ago:
+                valid_records += 1
+                emoji_tag = "🔴 ALERT: " if m.get("alert") else "🔹 Log: "
+                
+                with st.expander(f"{emoji_tag} Wpis z dnia {ts.strftime('%Y-%m-%d %H:%M')}"):
+                    st.write(f"**Co powiedziało dziecko:** *\"{m.get('user_text', 'Brak zarejestrowanego tekstu')}\"*")
+                    st.write(f"**Wykryta emocja:** {m.get('emotion', 'brak')}")
+                    st.write(f"**Zainteresowanie:** {m.get('interest', 'brak')}")
+                    if m.get('alert'):
+                        st.error(f"ZAGROŻENIE: {m.get('alert')}")
+                        
+    if valid_records == 0:
+        st.write("Brak zarejestrowanych metadanych w ciągu ostatnich 30 dni.")
         
     st.divider()
-    if st.button("Wyloguj i wróć do ekranu startowego", type="primary"):
+    if st.button("Wyloguj całkowicie i wyczyść sesję", type="primary"):
         st.session_state.role = "login"
+        st.session_state.user_id = ""
+        st.session_state.messages = []
         st.rerun()
 
 def screen_child():
-    # Ukryty, mały panel wyjścia
     with st.expander("🔒 Wyjście dla Rodzica"):
         exit_pwd = st.text_input("Wpisz hasło rodzica, aby wyjść:", type="password", key="exit_pwd")
         if st.button("Opuść panel dziecka"):
@@ -211,18 +228,15 @@ def screen_child():
 
     st.title("🤖 Iskra")
 
-    # Wyświetlanie załadowanej historii czatu
     for msg in st.session_state.messages:
         with st.chat_message("user" if msg["is_user"] else "assistant"):
             st.write(msg["text"])
 
-    # Obsługa wiadomości
     if user_input := st.chat_input("Napisz do Iskry..."):
         if not st.session_state.api_key:
-            st.error("Rodzic musi najpierw podać klucz API w swoim panelu!")
+            st.error("Rodzic musi podać klucz API w swoim panelu!")
             return
             
-        # Zapis i wyświetlenie wiadomości użytkownika
         st.session_state.messages.append({"text": user_input, "is_user": True})
         db_ops.save_chat_message(st.session_state.user_id, user_input, True)
         
@@ -243,15 +257,14 @@ def screen_child():
                 clean_text, metadata = parse_and_clean_response(raw_response)
                 st.write(clean_text)
                 
-                # Zapis odpowiedzi bota
                 st.session_state.messages.append({"text": clean_text, "is_user": False})
                 db_ops.save_chat_message(st.session_state.user_id, clean_text, False)
                 
-                # Aktualizacja metadanych
+                # Przekazujemy user_input, żeby zapisać kontekst wypowiedzi dziecka
                 if metadata:
-                    st.session_state.last_metadata = metadata
                     db_ops.save_metadata(
                         user_id=st.session_state.user_id,
+                        user_text=user_input,
                         emotion=metadata.get("EMOTION"),
                         interest=metadata.get("INTEREST"),
                         alert=metadata.get("ALERT")

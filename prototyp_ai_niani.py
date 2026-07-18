@@ -109,7 +109,6 @@ def load_user_data(account_id):
 def screen_login():
     st.title("Witaj w Iskrze 🤖")
     
-    # Automatyczne logowanie: jeśli rola zmieniła się po powrocie, ale użytkownik jest już w bazie
     if st.session_state.user_id:
         load_user_data(st.session_state.user_id)
         st.info(f"Wykryto aktywną sesję dla: **{st.session_state.user_id}**")
@@ -125,6 +124,7 @@ def screen_login():
         
         if st.button("Zmień konto / Zaloguj na inne ID", type="secondary"):
             st.session_state.user_id = ""
+            st.session_state.messages = []
             st.rerun()
         return
 
@@ -180,7 +180,6 @@ def screen_parent():
     st.divider()
     st.subheader("📊 Analiza zachowań z ostatnich 30 dni")
     
-    # Pobieramy świeże dane profilu z bazy danych
     profile = db_ops.get_user_profile(st.session_state.user_id)
     metadata_history = profile.get("history", [])
     
@@ -189,12 +188,9 @@ def screen_parent():
     
     valid_records = 0
     
-    # Przechodzimy od najnowszych wpisów do najstarszych
     for m in reversed(metadata_history):
         ts = m.get("timestamp")
-        # Konwersja timestampu z Firebase na obiekt datetime, jeśli jest taka potrzeba
         if ts:
-            # Filtrujemy dane z ostatnich 30 dni
             if ts >= thirty_days_ago:
                 valid_records += 1
                 emoji_tag = "🔴 ALERT: " if m.get("alert") else "🔹 Log: "
@@ -210,11 +206,18 @@ def screen_parent():
         st.write("Brak zarejestrowanych metadanych w ciągu ostatnich 30 dni.")
         
     st.divider()
-    if st.button("Wyloguj całkowicie i wyczyść sesję", type="primary"):
+    
+    # ZMIANA: Powrót do menu zamiast resetu sesji
+    if st.button("wyjdź", type="primary", use_container_width=True):
         st.session_state.role = "login"
-        st.session_state.user_id = ""
-        st.session_state.messages = []
         st.rerun()
+        
+    with st.expander("⚠️ Opcje zaawansowane"):
+        if st.button("Całkowite wylogowanie z konta", type="secondary"):
+            st.session_state.role = "login"
+            st.session_state.user_id = ""
+            st.session_state.messages = []
+            st.rerun()
 
 def screen_child():
     with st.expander("🔒 Wyjście dla Rodzica"):
@@ -260,7 +263,6 @@ def screen_child():
                 st.session_state.messages.append({"text": clean_text, "is_user": False})
                 db_ops.save_chat_message(st.session_state.user_id, clean_text, False)
                 
-                # Przekazujemy user_input, żeby zapisać kontekst wypowiedzi dziecka
                 if metadata:
                     db_ops.save_metadata(
                         user_id=st.session_state.user_id,

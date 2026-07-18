@@ -101,12 +101,26 @@ def load_user_data(account_id):
     st.session_state.api_key = profile.get("api_key", "")
     st.session_state.parent_password = profile.get("parent_password", "1234")
     
-    # Ładowanie historii czatu z bazy, lub ustawienie powitania, jeśli baza jest pusta
+    # Ładowanie historii czatu
     chat_history = profile.get("chat_history", [])
     if not chat_history:
         st.session_state.messages = [{"text": "Cześć! Znajdź coś czerwonego i dotknij tego!", "is_user": False}]
     else:
         st.session_state.messages = chat_history
+
+    # --- NOWE: Ładowanie ostatnich metadanych z bazy ---
+    metadata_history = profile.get("history", [])
+    if metadata_history:
+        # Pobieramy ostatni element z tablicy (najnowsze metadane)
+        last_db_meta = metadata_history[-1] 
+        # Mapujemy klucze z bazy (małe litery) na to, czego oczekuje interfejs (wielkie litery)
+        st.session_state.last_metadata = {
+            "EMOTION": last_db_meta.get("emotion"),
+            "INTEREST": last_db_meta.get("interest"),
+            "ALERT": last_db_meta.get("alert")
+        }
+    else:
+        st.session_state.last_metadata = {}
 
 # --- EKRANY APLIKACJI ---
 

@@ -35,7 +35,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-MODEL_NAME = "gemini-3.1-flash-fite"
+MODEL_NAME = "gemini-3.1-flash-lite"
 DEFAULT_SYSTEM_PROMPT = ("""
     Jesteś 'Iskrą' – interaktywnym, niezwykle ciekawym świata i przyjacielskim robotem-towarzyszem dla dzieci w wieku 5-8 lat. 
 Jesteś mądrym, pełnym entuzjazmu starszym bratem/siostrą. Nie jesteś encyklopedią.

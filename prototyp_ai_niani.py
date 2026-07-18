@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import time
 import re
-import db_operations as db_ops  # Moduł Firebase wypracowany wcześniej
+import db_operations as db_ops
 
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(
@@ -61,7 +61,7 @@ DEFAULT_SYSTEM_PROMPT = (
 
 # --- INICJALIZACJA STANU APLIKACJI ---
 if "role" not in st.session_state:
-    st.session_state.role = "login"  # Dostępne: login, parent_login, child, parent, exit_auth
+    st.session_state.role = "login"  # Dostępne: login, parent_login, child, parent
 if "messages" not in st.session_state:
     st.session_state.messages = [{"text": "Cześć! Znajdź coś czerwonego i dotknij tego!", "is_user": False}]
 if "api_key" not in st.session_state:
@@ -73,11 +73,9 @@ if "last_metadata" not in st.session_state:
 
 # --- FUNKCJE POMOCNICZE ---
 def check_password(password):
-    try:
-        return password == st.secrets["admin"]["password"]
-    except KeyError:
-        st.error("Błąd konfiguracji: Brak sekcji [admin] w secrets.toml!")
-        return False
+    # Weryfikacja hasła bezpośrednio z bazy danych Firestore dla danego profilu dziecka
+    correct_password = db_ops.get_parent_password(st.session_state.user_id)
+    return password == correct_password
 
 def parse_and_clean_response(raw_text):
     tag_pattern = r"\[([A-Z]+):\s*(.*?)\]"
@@ -123,7 +121,7 @@ def screen_login():
 
 def screen_parent_login():
     st.title("🔒 Logowanie do Panelu Rodzica")
-    pwd = st.text_input("Podaj hasło administratora:", type="password")
+    pwd = st.text_input("Podaj hasło rodzica:", type="password")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -132,7 +130,7 @@ def screen_parent_login():
                 st.session_state.role = "parent"
                 st.rerun()
             else:
-                st.error("Nieprawidłowe hasło!")
+                st.error("Nieprawidłowe hasło! (Domyślne to 1234)")
     with col2:
         if st.button("Wróć", use_container_width=True):
             st.session_state.role = "login"
@@ -141,17 +139,29 @@ def screen_parent_login():
 def screen_parent():
     st.title("📊 Panel Rodzica")
     
-    st.subheader("Ustawienia systemowe")
+    st.subheader("⚙️ Ustawienia systemowe")
     new_api_key = st.text_input("Klucz API Gemini", value=st.session_state.api_key, type="password")
     new_user_id = st.text_input("ID Dziecka w Bazie", value=st.session_state.user_id)
     
-    if st.button("Zapisz ustawienia"):
+    if st.button("Zapisz klucz i ID dziecka"):
         st.session_state.api_key = new_api_key
         st.session_state.user_id = new_user_id
-        st.success("Ustawienia zapisane!")
+        st.success("Ustawienia systemowe zapisane lokalnie!")
+        
+    st.divider()
+    st.subheader("🔑 Bezpieczeństwo i Hasło")
+    current_db_pass = db_ops.get_parent_password(st.session_state.user_id)
+    new_password = st.text_input("Zmień hasło do Panelu Rodzica / Wyjścia z aplikacji", value=current_db_pass, type="password")
+    
+    if st.button("Zapisz nowe hasło w bazie"):
+        if new_password.strip() == "":
+            st.error("Hasło nie może być puste!")
+        else:
+            if db_ops.update_parent_password(st.session_state.user_id, new_password):
+                st.success("Hasło zostało pomyślnie zaktualizowane w bazie danych Firestore!")
     
     st.divider()
-    st.subheader("Ostatni odczyt z bazy (Metadane)")
+    st.subheader("📊 Ostatni odczyt z bazy (Metadane)")
     m = st.session_state.last_metadata
     if m:
         st.info(f"Ostatnia Emocja: {m.get('EMOTION', 'brak')}")
@@ -159,18 +169,18 @@ def screen_parent():
         if m.get('ALERT'): 
             st.error(f"⚠️ OSTATNI ALERT: {m['ALERT']}")
     else:
-        st.write("Brak danych z bieżącej sesji.")
+        st.write("Brak danych z bieżącej sesji czatu.")
         
     st.divider()
-    if st.button("Wyloguj i wróć do startu", type="primary"):
+    if st.button("Wyloguj i wróć do ekranu startowego", type="primary"):
         st.session_state.role = "login"
         st.rerun()
 
 def screen_child():
-    # Nagłówek i przycisk wyjścia (w małym expanderze, żeby nie rozpraszać)
-    with st.expander("🔒 Wyjście"):
-        exit_pwd = st.text_input("Hasło rodzica, aby wyjść:", type="password", key="exit_pwd")
-        if st.button("Opuść czat"):
+    # Ukryty, mały panel wyjścia
+    with st.expander("🔒 Wyjście dla Rodzica"):
+        exit_pwd = st.text_input("Wpisz hasło rodzica, aby wyjść:", type="password", key="exit_pwd")
+        if st.button("Opuść panel dziecka"):
             if check_password(exit_pwd):
                 st.session_state.role = "login"
                 st.rerun()
@@ -179,12 +189,12 @@ def screen_child():
 
     st.title("🤖 Iskra")
 
-    # Wyświetlanie historii czatu
+    # Wyświetlanie czatu
     for msg in st.session_state.messages:
         with st.chat_message("user" if msg["is_user"] else "assistant"):
             st.write(msg["text"])
 
-    # Obsługa wiadomości dziecka
+    # Obsługa wiadomości
     if user_input := st.chat_input("Napisz do Iskry..."):
         if not st.session_state.api_key:
             st.error("Rodzic musi najpierw podać klucz API w swoim panelu!")
@@ -208,11 +218,9 @@ def screen_child():
                 clean_text, metadata = parse_and_clean_response(raw_response)
                 st.write(clean_text)
                 
-                # Zapis lokalny do wyświetlenia w Panelu Rodzica
                 if metadata:
                     st.session_state.last_metadata = metadata
                     
-                    # Zapis do Firestore
                     db_ops.save_metadata(
                         user_id=st.session_state.user_id,
                         emotion=metadata.get("EMOTION"),

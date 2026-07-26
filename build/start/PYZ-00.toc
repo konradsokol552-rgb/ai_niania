@@ -1,4 +1,4 @@
-('C:\\Users\\konra\\Desktop\\ai_niania\\build\\start\\PYZ-00.pyz',
+('C:\\Users\\konra\\desktop\\ai_niania\\build\\start\\PYZ-00.pyz',
  [('PyInstaller',
    'C:\\Users\\konra\\AppData\\Local\\Programs\\Python\\Python313\\Lib\\site-packages\\PyInstaller\\__init__.py',
    'PYMODULE'),
